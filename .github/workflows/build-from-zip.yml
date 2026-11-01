@@ -1,0 +1,68 @@
+name: Build Softcare from uploaded ZIP
+on:
+  push:
+    paths:
+      - '*.zip'
+      - '.github/workflows/build-from-zip.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Find ZIP
+        id: z
+        run: |
+          f=$(ls -1 *.zip 2>/dev/null | head -n1 || true)
+          if [ -z "$f" ]; then
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "কোনো ZIP পাওয়া যায়নি, বিল্ড বাদ"
+          else
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "file=$f" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Java 17
+        if: steps.z.outputs.found == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        if: steps.z.outputs.found == 'true'
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Extract ZIP
+        if: steps.z.outputs.found == 'true'
+        env:
+          ZIP: ${{ steps.z.outputs.file }}
+        run: |
+          mkdir -p source
+          unzip -q "$ZIP" -d source
+          S=$(find source -name settings.gradle | head -n1)
+          test -n "$S"
+          echo "PROJ=$(dirname "$S")" >> "$GITHUB_ENV"
+
+      - name: Accept SDK licenses
+        if: steps.z.outputs.found == 'true'
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+
+      - name: Build debug APK
+        if: steps.z.outputs.found == 'true'
+        run: gradle --no-daemon -p "$PROJ" :app:assembleDebug
+
+      - name: Upload APK
+        if: steps.z.outputs.found == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Softcare-Music-Player-debug-apk
+          path: ${{ env.PROJ }}/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
